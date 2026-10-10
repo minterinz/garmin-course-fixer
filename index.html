@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>佳明路书纠偏器 · Garmin Course Fixer</title>
+<style>
+  :root{--bg:#14161a;--panel:#1c1f26;--line:#2b303a;--fg:#e8eaed;--dim:#9aa3b2;--ok:#3ddc84;--bad:#ff6b6b;--warn:#ffc107;--acc:#4c9aff}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.6 "Microsoft YaHei",system-ui,sans-serif}
+  header{padding:18px 22px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,#1b2030,#14161a)}
+  h1{margin:0;font-size:19px}
+  h1 small{color:var(--dim);font-weight:400;font-size:12px;margin-left:8px}
+  main{display:grid;grid-template-columns:minmax(420px,1fr) minmax(380px,1fr);gap:14px;padding:14px 22px 40px;align-items:start}
+  @media (max-width:1000px){main{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
+  .card h2{margin:0 0 10px;font-size:14px;color:var(--acc);letter-spacing:.3px}
+  #drop{border:2px dashed #3a4250;border-radius:10px;padding:22px;text-align:center;color:var(--dim);cursor:pointer;transition:.15s}
+  #drop.hot{border-color:var(--acc);background:#1a2333;color:var(--fg)}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0}
+  button{background:#2a3140;color:var(--fg);border:1px solid #39414f;border-radius:7px;padding:6px 12px;cursor:pointer;font-size:13px}
+  button:hover:not(:disabled){background:#333c4d}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  button.pri{background:#2b5fd9;border-color:#3b73f0}
+  button.pri:hover:not(:disabled){background:#3569e0}
+  select,input[type=file]{background:#222833;color:var(--fg);border:1px solid #39414f;border-radius:7px;padding:6px 8px;font-size:13px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:6px 6px;border-bottom:1px solid var(--line);vertical-align:middle}
+  th{color:var(--dim);font-weight:400;font-size:12px}
+  .tag{display:inline-block;padding:1px 7px;border-radius:99px;font-size:11.5px;border:1px solid}
+  .t-gcj{color:var(--bad);border-color:#5b2b2b;background:#2a1a1a}
+  .t-wgs{color:var(--ok);border-color:#26503a;background:#16241d}
+  .t-unk{color:var(--warn);border-color:#5b4a1b;background:#2a2414}
+  .t-work{color:var(--acc);border-color:#274a7a;background:#16202e}
+  #log{font:12px/1.5 Consolas,monospace;color:var(--dim);max-height:190px;overflow:auto;white-space:pre-wrap;background:#161a21;border:1px solid var(--line);border-radius:8px;padding:10px}
+  #map{width:100%;height:380px;border-radius:8px;border:1px solid var(--line);background:#0f1216;cursor:grab;display:block}
+  .hint{color:var(--dim);font-size:12.5px}
+  .kv{color:var(--dim)}
+  code{background:#20252e;padding:1px 5px;border-radius:4px;font-size:12px}
+  details{margin-top:10px}
+  summary{cursor:pointer;color:var(--acc);font-size:13px}
+</style>
+</head>
+<body>
+<header>
+  <h1>佳明路书纠偏器 <small>Garmin Course Fixer · 离线可用 · 文件不会被修改（只生成新文件）</small></h1>
+</header>
+
+<main>
+  <div>
+    <div class="card">
+      <h2>1) 丢进文件</h2>
+      <div id="drop">把 <code>.fit</code>（佳明课程/路书）或 <code>.gpx</code>（两步路导出等）拖到这里，或点击选择文件</div>
+      <input type="file" id="file" multiple accept=".fit,.FIT,.gpx,.GPX" style="display:none">
+      <div class="row">
+        <label class="hint">处理方式</label>
+        <select id="mode">
+          <option value="auto">自动判断（需联网查 OSM 路网）→ 若判定"加偏"则纠偏</option>
+          <option value="g2w">强制 GCJ-02 → WGS-84（纠偏，最常用）</option>
+          <option value="w2g">强制 WGS-84 → GCJ-02（加偏，给中文地图用）</option>
+          <option value="none">只检测、不改（看判定结果）</option>
+        </select>
+        <button id="go" class="pri" disabled>开始处理</button>
+        <button id="dlall" disabled>下载全部结果</button>
+        <button id="clear">清空</button>
+      </div>
+      <table>
+        <thead><tr><th>文件</th><th>点数</th><th>判定</th><th>结果</th><th></th></tr></thead>
+        <tbody id="rows"><tr><td colspan="5" class="hint">还没有文件</td></tr></tbody>
+      </table>
+      <div id="log"></div>
+    </div>
+
+    <div class="card" style="margin-top:14px">
+      <h2>2) 地图核对（可选，联网）</h2>
+      <div class="row">
+        <label class="hint">显示</label>
+        <select id="layer">
+          <option value="both">原始(红) + 纠偏后(绿)</option>
+          <option value="orig">只看原始(红)</option>
+          <option value="fixed">只看纠偏后(绿)</option>
+        </select>
+        <button id="zin">＋</button><button id="zout">－</button>
+        <button id="fit">回到轨迹</button>
+        <button id="tiles">底图开/关</button>
+      </div>
+      <canvas id="map" width="900" height="760"></canvas>
+      <div class="hint">拖动平移 · 滚轮缩放 · 底图 © OpenStreetMap。线压在道路上=对；整条线平行偏开约 365 m=就是本文要修的"加偏"。</div>
+    </div>
+  </div>
+
+  <div>
+    <div class="card">
+      <h2>这是什么偏移？</h2>
+      <p class="hint" style="margin-top:0">
+      中国大陆的合规地图（高德/腾讯/佳明中国地图）用的是被法规要求"加密"过的 <b>GCJ-02（火星坐标）</b>；
+      而 GPS 芯片、佳明手表/码表自己记录、两步路导出的 GPX 用的是真实的 <b>WGS-84</b>。
+      两者在昆明一带相差约 <b>南 331 m、东 142 m（合 365 m）</b>。</p>
+      <p class="hint">所以在"中文地图"上生成/描线的路书，文件里会写死 GCJ 坐标。装进手表/码表后，设备拿你真实位置（WGS-84）去比，线就整体偏东南 365 m ⇒ 一路"回到道路"/漂移。<b>把文件坐标换算回 WGS-84 即可修好。</b></p>
+      <details>
+        <summary>工具怎么判断一条线是不是"加偏"？</summary>
+        <p class="hint">取轨迹点最密的几个 0.01° 窗口，从 OpenStreetMap 抓真实路网，然后算两种假设下"点到最近道路"的距离中位数：<br>
+        A：把这些坐标当真坐标 →中位差小 ⇒ 正常 WGS-84<br>
+        B：把这些坐标先按 GCJ→WGS 换算 →中位差小 ⇒ 原来是加偏的<br>
+        典型对比：加偏文件 A=101.9 m / B=3.8 m；正常文件 A=3.8 m / B=60.4 m。</p>
+      </details>
+      <details>
+        <summary>处理细节 / 会不会弄坏文件？</summary>
+        <p class="hint">· FIT：只改写位置字段（record #0/#1、lap #3~#6、course_point #2/#3 等）的 4 字节数值，其它字节原样保留，末尾 CRC-16 重算，文件结构不变，名字可加后缀。<br>
+        · GPX：只改写 <code>trkpt/rtept/wpt</code> 的 <code>lat/lon</code> 属性，其余文本原样保留。<br>
+        · 原文件永远不动，纠偏结果另存为 <code>原名-WGS.fit</code> / <code>原名-gcj02.gpx</code>。<br>
+        · 不放心就先勾"只检测、不改"跑一遍，再处理。</p>
+      </details>
+      <details>
+        <summary>怎么把结果放进设备？</summary>
+        <p class="hint">① USB 连电脑 → 打开设备的 <code>Garmin\NewFiles</code>（或 <code>Garmin\Courses</code>）→ 把 <code>-WGS.fit</code> 拷进去 → 拔线、把设备关机再开，路线/课程列表里就会出现。<br>
+        ② 或把 GPX 导入 Garmin Connect 网页（训练 → 路线 → 导入）再同步。<br>
+        ③ 拷完后把旧的"加偏"课程在设备上删掉，避免同名混用。</p>
+      </details>
+      <details>
+        <summary>反向：为什么还需要 WGS→GCJ？</summary>
+        <p class="hint">如果要把轨迹贴到高德/百度之类的中文地图上核对，或者某台设备确实按 GCJ 口径显示，就用"强制加偏"生成 GCJ 版本。两种方向随时可来回换。</p>
+      </details>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <h2>命令行版（可选）</h2>
+      <p class="hint">同一套算法也有 Python 版，适合批量：<br>
+      <code>python fit_shift.py 输入.fit 输出.fit g2w --rename "新名字"</code><br>
+      <code>python fit_shift.py 输入.fit 输出.fit w2g</code></p>
+    </div>
+  </div>
+</main>
+
+<script>
+// ===== ENGINE START =====
+const GCJ = (function () {
+  const A = 6378245.0, EE = 0.00669342162296594323, PI = Math.PI;
+  function outOfChina(lat, lon) { return !(lon > 73.66 && lon < 135.05 && lat > 3.86 && lat < 53.55); }
+  function tLat(x, y) {
+    let r = -100 + 2 * x + 3 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * Math.sqrt(Math.abs(x));
+    r += (20 * Math.sin(6 * x * PI) + 20 * Math.sin(2 * x * PI)) * 2 / 3;
+    r += (20 * Math.sin(y * PI) + 40 * Math.sin(y / 3 * PI)) * 2 / 3;
+    r += (160 * Math.sin(y / 12 * PI) + 320 * Math.sin(y * PI / 30)) * 2 / 3;
+    return r;
+  }
+  function tLon(x, y) {
+    let r = 300 + x + 2 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * Math.sqrt(Math.abs(x));
+    r += (20 * Math.sin(6 * x * PI) + 20 * Math.sin(2 * x * PI)) * 2 / 3;
+    r += (20 * Math.sin(x * PI) + 40 * Math.sin(x / 3 * PI)) * 2 / 3;
+    r += (150 * Math.sin(x / 12 * PI) + 300 * Math.sin(x / 30 * PI)) * 2 / 3;
+    return r;
+  }
+  function wgs2gcj(lat, lon) {
+    if (outOfChina(lat, lon)) return [lat, lon];
+    const dLat0 = tLat(lon - 105, lat - 35), dLon0 = tLon(lon - 105, lat - 35);
+    const rad = lat / 180 * PI;
+    let magic = Math.sin(rad); magic = 1 - EE * magic * magic;
+    const sq = Math.sqrt(magic);
+    const dLat = (dLat0 * 180) / ((A * (1 - EE)) / (magic * sq) * PI);
+    const dLon = (dLon0 * 180) / (A / sq * Math.cos(rad) * PI);
+    return [lat + dLat, lon + dLon];
+  }
+  function gcj2wgs(lat, lon) {
+    if (outOfChina(lat, lon)) return [lat, lon];
+    let wlat = lat, wlon = lon;
+    for (let i = 0; i < 6; i++) { const g = wgs2gcj(wlat, wlon); wlat += lat - g[0]; wlon += lon - g[1]; }
+    return [wlat, wlon];
+  }
+  return { outOfChina, wgs2gcj, gcj2wgs };
+})();
+
+const CRC_TABLE = [0x0000,0xCC01,0xD801,0x1400,0xF001,0x3C00,0x2800,0xE401,
+                   0xA001,0x6C00,0x7800,0xB401,0x5000,0x9C01,0x8801,0x4400];
+function fitCrc(bytes, crc) {
+  crc = crc || 0;
+  for (let i = 0; i < bytes.length; i++) {
+    const b = bytes[i];
+    let tmp = CRC_TABLE[crc & 0xF];
+    crc = (crc >> 4) & 0x0FFF;
+    crc ^= tmp ^ CRC_TABLE[b & 0xF];
+    tmp = CRC_TABLE[crc & 0xF];
+    crc = (crc >> 4) & 0x0FFF;
+    crc ^= tmp ^ CRC_TABLE[(b >> 4) & 0xF];
+  }
+  return crc & 0xFFFF;
+}
+const SC = 180.0 / 2147483648.0;
+const LATFN = { 20: [0, 1], 32: [2, 3], 19: null };  // 19 单独处理（两组）
+
+function isFit(u8) {
+  return u8.length > 16 && u8[8] === 0x2E && u8[9] === 0x46 && u8[10] === 0x49 && u8[11] === 0x54;
+}
+function readI32(u8, off, le) {
+  const a = u8[off], b = u8[off + 1], c = u8[off + 2], d = u8[off + 3];
+  return le ? (a | (b << 8) | (c << 16) | (d << 24)) : ((a << 24) | (b << 16) | (c << 8) | d);
+}
+function writeI32(u8, off, v, le) {
+  const b = [(v >> 24) & 255, (v >> 16) & 255, (v >> 8) & 255, v & 255];  // 大端序排列
+  if (le) { u8[off] = b[3]; u8[off + 1] = b[2]; u8[off + 2] = b[1]; u8[off + 3] = b[0]; }
+  else { u8[off] = b[0]; u8[off + 1] = b[1]; u8[off + 2] = b[2]; u8[off + 3] = b[3]; }
+}
+function deg2sc(d) { return Math.round(d * (2147483648.0 / 180.0)); }
+
+/** 扫描 FIT：返回位置对（字节偏移 + 经纬度）、课程名位置、告警 */
+function fitScan(u8) {
+  const out = { pairs: [], name: null, nameOff: 0, nameSize: 0, warnings: [], ok: false, msgs: {} };
+  if (!isFit(u8)) { out.warnings.push('不是 FIT 文件'); return out; }
+  const hdr = u8[0];
+  const dsize = u8[4] | (u8[5] << 8) | (u8[6] << 16) | (u8[7] << 24);
+  const end = hdr + dsize > u8.length ? u8.length : hdr + dsize;
+  const defs = {};
+  let pos = hdr;
+  const grab = (d, base, latFn, lonFn) => {
+    let latF = null, lonF = null;
+    for (const f of d.fields) { if (f.fn === latFn && f.sz === 4) latF = f; if (f.fn === lonFn && f.sz === 4) lonF = f; }
+    if (!latF || !lonF) return;
+    const vLat = readI32(u8, base + latF.off, d.le), vLon = readI32(u8, base + lonF.off, d.le);
+    const lat = vLat * SC, lon = vLon * SC;
+    if (!(lat > -90 && lat < 90 && lon > -180 && lon < 180)) return;
+    if (Math.abs(lat) < 1e-5 && Math.abs(lon) < 1e-5) return;
+    out.pairs.push({ latOff: base + latF.off, lonOff: base + lonF.off, le: d.le, lat, lon });
+  };
+  while (pos < end) {
+    const h = u8[pos++];
+    if (h & 0x80) {                       // 压缩时间戳数据消息（载荷不含 timestamp 字段）
+      const lmt = (h >> 5) & 3, d = defs[lmt];
+      if (!d) { out.warnings.push('压缩时间戳消息指向未定义 lmt=' + lmt + '（解析中止）'); break; }
+      pos += d.total - d.tsSize;
+      continue;
+    }
+    const lmt = h & 0x0F;
+    if (h & 0x40) {                       // 定义消息
+      const dev = (h & 0x20) !== 0;
+      pos += 1;                           // reserved
+      const arch = u8[pos++];
+      const le = arch === 0;
+      const gn = le ? (u8[pos] | (u8[pos + 1] << 8)) : ((u8[pos] << 8) | u8[pos + 1]);
+      pos += 2;
+      const nf = u8[pos++];
+      const fields = [];
+      for (let i = 0; i < nf; i++) { fields.push({ fn: u8[pos], sz: u8[pos + 1], bt: u8[pos + 2], off: 0 }); pos += 3; }
+      if (dev) { const nd = u8[pos++]; pos += 3 * nd; }
+      let total = 0, tsSize = 0;
+      for (const f of fields) { f.off = total; total += f.sz; if (f.fn === 253) tsSize = f.sz; }
+      defs[lmt] = { gn, fields, total, tsSize, le };
+      out.msgs[gn] = (out.msgs[gn] || 0) + 1;
+      if (gn > 1000 && !(gn >= 0xFF00)) { out.warnings.push('出现异常消息号 ' + gn + '（解析中止）'); break; }
+    } else {
+      const d = defs[lmt];
+      if (!d) { out.warnings.push('数据消息指向未定义 lmt=' + lmt + '（解析中止）'); break; }
+      const base = pos; pos += d.total;
+      if (d.gn === 20) grab(d, base, 0, 1);
+      else if (d.gn === 32) grab(d, base, 2, 3);
+      else if (d.gn === 19) { grab(d, base, 3, 4); grab(d, base, 5, 6); }
+      else if (d.gn === 31) {
+        for (const f of d.fields) {
+          if (f.fn === 5 && f.bt === 0x07) {
+            out.nameOff = base + f.off; out.nameSize = f.sz;
+            let s = '';
+            for (let i = 0; i < f.sz && u8[base + f.off + i]; i++) s += String.fromCharCode(u8[base + f.off + i]);
+            try { out.name = decodeURIComponent(escape(s)); } catch (e) { out.name = s; }
+          }
+        }
+      }
+    }
+  }
+  out.ok = out.pairs.length > 0;
+  return out;
+}
+
+/** 对 FIT 施加逐点换算，返回新的 Uint8Array */
+function fitApply(u8, conv, newName) {
+  const buf = u8.slice();
+  const info = fitScan(buf);
+  for (const p of info.pairs) {
+    const n = conv(p.lat, p.lon);
+    writeI32(buf, p.latOff, deg2sc(n[0]), p.le);
+    writeI32(buf, p.lonOff, deg2sc(n[1]), p.le);
+  }
+  if (newName && info.nameSize && info.nameOff) {
+    let bytes;
+    try { bytes = new TextEncoder().encode(newName); } catch (e) { bytes = null; }
+    if (bytes && bytes.length <= info.nameSize) {
+      for (let i = 0; i < info.nameSize; i++) buf[info.nameOff + i] = i < bytes.length ? bytes[i] : 0;
+    } else { info.warnings.push('课程名放不进原字段长度，未改名'); }
+  }
+  const hdr = buf[0];
+  const dsize = buf[4] | (buf[5] << 8) | (buf[6] << 16) | (buf[7] << 24);
+  const end = hdr + dsize;
+  if (end + 2 <= buf.length) {
+    const crc = fitCrc(buf.subarray(0, end));
+    buf[end] = crc & 0xFF; buf[end + 1] = (crc >> 8) & 0xFF;
+  }
+  return { bytes: buf, info };
+}
+
+/** 扫描 GPX 文本：返回点数组 */
+function gpxScan(text) {
+  const re = /<(trkpt|rtept|wpt)\b[^>]*>/g;
+  const pts = [];
+  let m;
+  while ((m = re.exec(text))) {
+    const tag = m[0];
+    const la = /\blat\s*=\s*"([-\d.]+)"/.exec(tag), lo = /\blon\s*=\s*"([-\d.]+)"/.exec(tag);
+    if (la && lo) pts.push({ lat: parseFloat(la[1]), lon: parseFloat(lo[1]) });
+  }
+  return pts;
+}
+function gpxApply(text, conv) {
+  return text.replace(/<(trkpt|rtept|wpt)\b[^>]*>/g, (tag) => {
+    const la = /\blat\s*=\s*"([-\d.]+)"/.exec(tag), lo = /\blon\s*=\s*"([-\d.]+)"/.exec(tag);
+    if (!la || !lo) return tag;
+    const n = conv(parseFloat(la[1]), parseFloat(lo[1]));
+    return tag.replace(/\blat\s*=\s*"[-\d.]+"/, 'lat="' + n[0].toFixed(7) + '"')
+              .replace(/\blon\s*=\s*"[-\d.]+"/, 'lon="' + n[1].toFixed(7) + '"');
+  });
+}
+
+// —— 贴 OSM 路网判坐标系（与命令行版 crs_batch.mjs 同算法）——
+const M_LAT = 111132.0;
+const mLon = (lat) => 111320.0 * Math.cos(lat * Math.PI / 180);
+function distToSeg(plat, plon, a, b) {
+  const kx = mLon(plat), ky = M_LAT;
+  const px = (plon - a[1]) * kx, py = (plat - a[0]) * ky;
+  const bx = (b[1] - a[1]) * kx, by = (b[0] - a[0]) * ky;
+  const L2 = bx * bx + by * by;
+  let t = L2 > 0 ? (px * bx + py * by) / L2 : 0;
+  t = t < 0 ? 0 : (t > 1 ? 1 : t);
+  return Math.hypot(px - t * bx, py - t * by);
+}
+function parseOsmRoads(xml) {
+  const nodes = new Map(), doc = new DOMParser().parseFromString(xml, 'application/xml');
+  for (const n of doc.getElementsByTagName('node')) nodes.set(n.getAttribute('id'), [parseFloat(n.getAttribute('lat')), parseFloat(n.getAttribute('lon'))]);
+  const segs = [];
+  for (const w of doc.getElementsByTagName('way')) {
+    let hw = false;
+    for (const t of w.getElementsByTagName('tag')) if (t.getAttribute('k') === 'highway') hw = true;
+    if (!hw) continue;
+    const refs = [];
+    for (const nd of w.getElementsByTagName('nd')) { const p = nodes.get(nd.getAttribute('ref')); if (p) refs.push(p); }
+    for (let i = 0; i + 1 < refs.length; i++) segs.push([refs[i], refs[i + 1]]);
+  }
+  return segs;
+}
+function medianDist(pts, segs) {
+  const ds = [];
+  for (const p of pts) {
+    let best = Infinity;
+    for (const s of segs) { const d = distToSeg(p[0], p[1], s[0], s[1]); if (d < best) best = d; if (best < 0.5) break; }
+    if (isFinite(best)) ds.push(best);
+  }
+  if (!ds.length) return NaN;
+  ds.sort((a, b) => a - b);
+  return ds[Math.floor(ds.length / 2)];
+}
+function densestCells(pts, k) {
+  const cells = new Map();
+  for (const p of pts) { const key = p.lat.toFixed(2) + ',' + p.lon.toFixed(2); cells.set(key, (cells.get(key) || 0) + 1); }
+  return [...cells.entries()].sort((a, b) => b[1] - a[1]).slice(0, k);
+}
+/** 联网判定：返回 {a, b, windows, err} */
+async function detectCRS(pts, log) {
+  const cells = densestCells(pts, 4);
+  const medA = [], medB = [], win = [];
+  for (const [key] of cells) {
+    const [clat, clon] = key.split(',').map(Number), pad = 0.011;
+    const bbox = [clon - pad, clat - pad, clon + pad, clat + pad].map(v => +v.toFixed(4));
+    const inWin = pts.filter(p => p.lat >= bbox[1] && p.lat <= bbox[3] && p.lon >= bbox[0] && p.lon <= bbox[2]);
+    if (inWin.length < 30) continue;
+    let xml;
+    try {
+      const url = 'https://api.openstreetmap.org/api/0.6/map?bbox=' + bbox.join(',');
+      const r = await fetch(url, { headers: { 'User-Agent': 'garmin-course-fixer/1.0 (local tool)' } });
+      if (!r.ok) throw new Error('OSM HTTP ' + r.status);
+      xml = await r.text();
+    } catch (e) {
+      if (log) log('  · 窗口 ' + key + ' 取 OSM 失败：' + e.message);
+      continue;
+    }
+    const segs = parseOsmRoads(xml);
+    if (!segs.length) continue;
+    const step = Math.ceil(inWin.length / 250);
+    const sample = inWin.filter((_, i) => i % step === 0);
+    const a = medianDist(sample, segs);
+    const b = medianDist(sample.map(p => { const q = GCJ.gcj2wgs(p.lat, p.lon); return [q[0], q[1]]; }), segs);
+    medA.push(a); medB.push(b);
+    win.push({ key, a: +a.toFixed(1), b: +b.toFixed(1), n: sample.length });
+  }
+  const med = (arr) => { if (!arr.length) return NaN; const s = [...arr].sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
+  const A = med(medA), B = med(medB);
+  let verdict = 'unknown';
+  if (isFinite(A) && isFinite(B)) {
+    if (B < 6 && A > 12) verdict = 'gcj';
+    else if (A < 6 && B > 12) verdict = 'wgs';
+    else if (A < 8 && B < 8) verdict = 'wgs';
+    else verdict = (B < A / 3) ? 'gcj' : (A < B / 3 ? 'wgs' : 'unknown');
+  }
+  return { a: A, b: B, verdict, windows: win };
+}
+// ===== ENGINE END =====
+
+// ---------------- UI ----------------
+const $ = (id) => document.getElementById(id);
+const files = [];       // {name, kind:'fit'|'gpx', buf|text, pts, detect, outBlob, outName, status}
+const logEl = $('log');
+function log(s) { logEl.textContent += s + '\n'; logEl.scrollTop = logEl.scrollHeight; }
+
+const ROW = () => {
+  const tb = $('rows');
+  tb.innerHTML = '';
+  if (!files.length) { tb.innerHTML = '<tr><td colspan="5" class="hint">还没有文件</td></tr>'; return; }
+  files.forEach((f, i) => {
+    const tr = document.createElement('tr');
+    const tag = f.detect
+      ? (f.detect.verdict === 'gcj' ? '<span class="tag t-gcj">加偏 GCJ-02</span>'
+        : f.detect.verdict === 'wgs' ? '<span class="tag t-wgs">正常 WGS-84</span>'
+        : '<span class="tag t-unk">无法判定</span>')
+      : (f.status === 'working' ? '<span class="tag t-work">检测中…</span>' : '<span class="hint">—</span>');
+    const det = f.detect ? `<span class="hint">A=${f.detect.a.toFixed(1)}m / B=${f.detect.b.toFixed(1)}m</span>` : '';
+    tr.innerHTML = `<td>${f.name}<br><span class="hint">${f.kind.toUpperCase()} · ${f.pts ? f.pts.length : 0} 点</span></td>
+      <td>${f.pts ? f.pts.length : '—'}</td>
+      <td>${tag}<br>${det}</td>
+      <td>${f.outName ? f.outName + '<br><span class="hint">已生成</span>' : '<span class="hint">未生成</span>'}</td>
+      <td></td>`;
+    const td = tr.lastElementChild;
+    if (f.outBlob) {
+      const b = document.createElement('button');
+      b.textContent = '下载';
+      b.onclick = () => saveBlob(f.outBlob, f.outName);
+      td.appendChild(b);
+      const v = document.createElement('button');
+      v.textContent = '预览';
+      v.style.marginLeft = '6px';
+      v.onclick = () => showOnMap(i);
+      td.appendChild(v);
+    }
+    $('rows').appendChild(tr);
+  });
+};
+function saveBlob(blob, name) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+}
+async function addFiles(list) {
+  for (const file of list) {
+    const buf = new Uint8Array(await file.arrayBuffer());
+    const isF = /\.fit$/i.test(file.name) || isFit(buf);
+    let rec = { name: file.name, kind: isF ? 'fit' : 'gpx', status: 'new' };
+    if (isF) {
+      rec.buf = buf;
+      const info = fitScan(buf);
+      rec.pts = info.pairs.map(p => ({ lat: p.lat, lon: p.lon }));
+      rec.info = info;
+      if (!info.ok) log('⚠ ' + file.name + '：FIT 解析不完整 — ' + info.warnings.join('；'));
+    } else {
+      rec.text = new TextDecoder('utf-8').decode(buf);
+      rec.pts = gpxScan(rec.text);
+    }
+    log('＋ ' + file.name + '（' + rec.kind.toUpperCase() + '，' + rec.pts.length + ' 点）');
+    files.push(rec);
+  }
+  ROW(); refreshButtons();
+}
+function refreshButtons() {
+  $('go').disabled = !files.some(f => f.status === 'new');
+  $('dlall').disabled = !files.some(f => f.outBlob);
+}
+async function processAll() {
+  const mode = $('mode').value;
+  for (const f of files) {
+    if (f.status !== 'new') continue;
+    f.status = 'working'; ROW();
+    if (!f.detect && f.pts.length && mode !== 'none') {
+      log('· ' + f.name + '：正在联网判定（OSM 路网）…');
+      try { f.detect = await detectCRS(f.pts, log); }
+      catch (e) { f.detect = { a: NaN, b: NaN, verdict: 'unknown', windows: [] }; log('  ✗ 判定失败：' + e.message); }
+    } else if (!f.detect) {
+      f.detect = { a: NaN, b: NaN, verdict: 'unknown', windows: [] };
+    }
+    let dir = mode;
+    if (mode === 'auto') dir = (f.detect.verdict === 'gcj') ? 'g2w' : 'none';
+    if (mode === 'none') dir = 'none';
+    if (dir !== 'none') {
+      const conv = dir === 'g2w' ? GCJ.gcj2wgs : GCJ.wgs2gcj;
+      const suffix = dir === 'g2w' ? '-WGS' : '-gcj02';
+      const base = f.name.replace(/\.[^.]+$/, '');
+      try {
+        if (f.kind === 'fit') {
+          const r = fitApply(f.buf, conv, base + suffix);
+          f.outBlob = new Blob([r.bytes], { type: 'application/octet-stream' });
+          f.outName = base + suffix + '.fit';
+          f.fixedPts = fitScan(r.bytes).pairs.map(p => ({ lat: p.lat, lon: p.lon }));
+          if (r.info.warnings.length) log('  ⚠ ' + r.info.warnings.join('；'));
+        } else {
+          const out = gpxApply(f.text, conv);
+          f.outBlob = new Blob([out], { type: 'application/gpx+xml' });
+          f.outName = base + suffix + '.gpx';
+          f.fixedPts = gpxScan(out);
+        }
+        log('✓ ' + f.name + ' → ' + f.outName + '（' + (dir === 'g2w' ? 'GCJ→WGS 纠偏' : 'WGS→GCJ 加偏') + '）');
+      } catch (e) { log('✗ ' + f.name + ' 处理失败：' + e.message); }
+    } else {
+      log('· ' + f.name + '：按判定结果无需修改');
+    }
+    f.status = 'done';
+    ROW(); refreshButtons();
+  }
+  if (files.some(f => f.pts)) showOnMap(files.findIndex(f => f.pts));
+}
+
+// ---------------- 迷你地图 ----------------
+const map = { cv: $('map'), ctx: $('map').getContext('2d'), z: 14, cx: 25.09, cy: 102.80, tiles: true, drag: null };
+const lon2x = (lon, z) => ((lon + 180) / 360) * Math.pow(2, z);
+const lat2y = (lat, z) => (1 - Math.log(Math.tan(Math.PI / 4 + lat * Math.PI / 360)) / Math.PI) / 2 * Math.pow(2, z);
+const x2lon = (x, z) => x / Math.pow(2, z) * 360 - 180;
+const y2lat = (y, z) => { const n = Math.PI - 2 * Math.PI * y / Math.pow(2, z); return 180 / Math.PI * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n))); };
+function showOnMap(idx) {
+  const f = files[idx]; if (!f || !f.pts || !f.pts.length) return;
+  const lats = f.pts.map(p => p.lat), lons = f.pts.map(p => p.lon);
+  map.cx = (Math.min(...lats) + Math.max(...lats)) / 2; map.cy = (Math.min(...lons) + Math.max(...lons)) / 2;
+  fitZoom(f); drawMap();
+}
+function fitZoom(f) {
+  const lats = f.pts.map(p => p.lat), lons = f.pts.map(p => p.lon);
+  const spanLat = Math.max(...lats) - Math.min(...lats), spanLon = Math.max(...lons) - Math.min(...lons);
+  for (let z = 17; z >= 5; z--) {
+    const px = lon2x(map.cy + spanLon / 2, z) - lon2x(map.cy - spanLon / 2, z);
+    const py = lat2y(Math.min(...lats), z) - lat2y(Math.max(...lats), z);
+    if (px * 256 < map.cv.width * 0.9 && py * 256 < map.cv.height * 0.9) { map.z = z; return; }
+  }
+  map.z = 6;
+}
+function drawMap() {
+  const { ctx, cv } = map, W = cv.width, H = cv.height;
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#0f1216'; ctx.fillRect(0, 0, W, H);
+  const w2 = W / 2, h2 = H / 2;
+  const cx = lon2x(map.cy, map.z) * 256, cy = lat2y(map.cx, map.z) * 256;
+  if (map.tiles) {
+    const t0x = Math.floor((cx - w2) / 256), t1x = Math.floor((cx + w2) / 256);
+    const t0y = Math.floor((cy - h2) / 256), t1y = Math.floor((cy + h2) / 256);
+    const n = Math.pow(2, map.z);
+    for (let tx = t0x; tx <= t1x; tx++) for (let ty = t0y; ty <= t1y; ty++) {
+      if (ty < 0 || ty >= n) continue;
+      const x = ((tx % n) + n) % n;
+      const img = new Image();
+      img.onload = () => ctx.drawImage(img, Math.round(tx * 256 - cx + w2), Math.round(ty * 256 - cy + h2));
+      img.src = 'https://tile.openstreetmap.org/' + map.z + '/' + x + '/' + ty + '.png';
+    }
+  }
+  const drawTrack = (pts, color, wdt) => {
+    if (!pts || pts.length < 2) return;
+    ctx.strokeStyle = color; ctx.lineWidth = wdt; ctx.lineJoin = 'round'; ctx.beginPath();
+    for (let i = 0; i < pts.length; i++) {
+      const x = lon2x(pts[i].lon, map.z) * 256 - cx + w2;
+      const y = lat2y(pts[i].lat, map.z) * 256 - cy + h2;
+      i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    }
+    ctx.stroke();
+  };
+  const layer = $('layer').value;
+  const f = files.find(x => x.pts);
+  if (f) {
+    if (layer !== 'fixed') drawTrack(f.pts, 'rgba(255,80,80,.95)', 2.5);
+    if (layer !== 'orig') drawTrack(f.fixedPts || f.pts.map(p => { const q = GCJ.gcj2wgs(p.lat, p.lon); return { lat: q[0], lon: q[1] }; }), 'rgba(60,220,130,.95)', 2);
+  }
+  ctx.fillStyle = '#9aa3b2'; ctx.font = '12px Consolas,monospace';
+  ctx.fillText('z' + map.z + '  ' + map.cx.toFixed(5) + ',' + map.cy.toFixed(5), 8, H - 8);
+}
+$('map').addEventListener('mousedown', e => { map.drag = { x: e.offsetX, y: e.offsetY, cx: map.cy, cy: map.cx }; });
+window.addEventListener('mouseup', () => map.drag = null);
+$('map').addEventListener('mousemove', e => {
+  if (!map.drag) return;
+  const k = Math.pow(2, map.z) * 256;
+  map.cy = map.drag.cx - (e.offsetX - map.drag.x) / k * 360;
+  const dLat = (e.offsetY - map.drag.y) / k * 360;
+  map.cx = y2lat(lat2y(map.drag.cy, map.z) + dLat / 360 * Math.pow(2, map.z), map.z);
+  drawMap();
+});
+$('map').addEventListener('wheel', e => {
+  e.preventDefault();
+  map.z = Math.max(3, Math.min(18, map.z + (e.deltaY < 0 ? 1 : -1)));
+  drawMap();
+}, { passive: false });
+$('zin').onclick = () => { map.z = Math.min(18, map.z + 1); drawMap(); };
+$('zout').onclick = () => { map.z = Math.max(3, map.z - 1); drawMap(); };
+$('fit').onclick = () => { const i = files.findIndex(f => f.pts); if (i >= 0) showOnMap(i); };
+$('tiles').onclick = () => { map.tiles = !map.tiles; drawMap(); };
+$('layer').onchange = drawMap;
+
+// ---------------- 交互 ----------------
+const drop = $('drop');
+drop.onclick = () => $('file').click();
+$('file').onchange = (e) => addFiles(e.target.files);
+drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('hot'); });
+drop.addEventListener('dragleave', () => drop.classList.remove('hot'));
+drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('hot'); if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files); });
+$('go').onclick = processAll;
+$('clear').onclick = () => { files.length = 0; logEl.textContent = ''; ROW(); refreshButtons(); drawMap(); };
+$('dlall').onclick = () => { for (const f of files) if (f.outBlob) saveBlob(f.outBlob, f.outName); };
+log('就绪。把佳明课程 .fit 或 .gpx 拖进来即可。原文件不会被改动。');
+drawMap();
+</script>
+</body>
+</html>
