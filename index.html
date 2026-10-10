@@ -64,7 +64,7 @@
         <button id="clear">清空</button>
       </div>
       <table>
-        <thead><tr><th>文件</th><th>点数</th><th>判定</th><th>结果</th><th></th></tr></thead>
+        <thead><tr><th>文件（点行切换地图高亮）</th><th>点数</th><th>判定</th><th>结果</th><th></th></tr></thead>
         <tbody id="rows"><tr><td colspan="5" class="hint">还没有文件</td></tr></tbody>
       </table>
       <div id="log"></div>
@@ -440,6 +440,9 @@ const ROW = () => {
       v.onclick = () => showOnMap(i);
       td.appendChild(v);
     }
+    tr.style.cursor = 'pointer';
+    tr.title = '点这一行，地图上高亮这条';
+    tr.onclick = (e) => { if (e.target && e.target.tagName === 'BUTTON') return; showOnMap(i); };
     $('rows').appendChild(tr);
   });
 };
@@ -518,7 +521,7 @@ async function processAll() {
 }
 
 // ---------------- 迷你地图 ----------------
-const map = { cv: $('map'), ctx: $('map').getContext('2d'), z: 14, cx: 25.09, cy: 102.80, tiles: true, src: 'esriSat', drag: null };
+const map = { cv: $('map'), ctx: $('map').getContext('2d'), z: 14, cx: 25.09, cy: 102.80, tiles: true, src: 'esriSat', sel: 0, drag: null };
 const TILE_SOURCES = {
   topo: { name: 'OpenTopoMap 地形', max: 17, url: (z, x, y) => `https://tile.opentopomap.org/${z}/${x}/${y}.png` },
   osmDe: { name: 'OSM 德国镜像', max: 19, url: (z, x, y) => `https://tile.openstreetmap.de/${z}/${x}/${y}.png` },
@@ -532,6 +535,7 @@ const x2lon = (x, z) => x / Math.pow(2, z) * 360 - 180;
 const y2lat = (y, z) => { const n = Math.PI - 2 * Math.PI * y / Math.pow(2, z); return 180 / Math.PI * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n))); };
 function showOnMap(idx) {
   const f = files[idx]; if (!f || !f.pts || !f.pts.length) return;
+  map.sel = idx;
   const lats = f.pts.map(p => p.lat), lons = f.pts.map(p => p.lon);
   map.cx = (Math.min(...lats) + Math.max(...lats)) / 2; map.cy = (Math.min(...lons) + Math.max(...lons)) / 2;
   fitZoom(f); drawMap();
@@ -601,7 +605,12 @@ function drawMap() {
     ctx.stroke();
   };
   const layer = $('layer').value;
-  const f = files.find(x => x.pts);
+  if (map.sel == null || !files[map.sel] || !files[map.sel].pts) {
+    const firstIdx = files.findIndex(x => x && x.pts);
+    map.sel = firstIdx < 0 ? 0 : firstIdx;
+  }
+  files.forEach((o, oi) => { if (oi !== map.sel && o && o.pts) drawTrack(o.pts, 'rgba(150,160,175,.45)', 1.5); });
+  const f = files[map.sel];
   if (f) {
     if (layer !== 'fixed') drawTrack(f.pts, 'rgba(255,80,80,.95)', 2.5);
     if (layer !== 'orig') {
