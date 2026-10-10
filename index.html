@@ -546,6 +546,13 @@ function fitZoom(f) {
   }
   map.z = 6;
 }
+const tileCache = new Map();
+let redrawQueued = false;
+function queueRedraw() {
+  if (redrawQueued) return;
+  redrawQueued = true;
+  requestAnimationFrame(() => { redrawQueued = false; drawMap(); });
+}
 function drawMap() {
   const { ctx, cv } = map, W = cv.width, H = cv.height;
   ctx.clearRect(0, 0, W, H);
@@ -561,10 +568,19 @@ function drawMap() {
     for (let tx = t0x; tx <= t1x; tx++) for (let ty = t0y; ty <= t1y; ty++) {
       if (ty < 0 || ty >= n) continue;
       const x = ((tx % n) + n) % n;
+      const tkey = map.src + '/' + map.z + '/' + x + '/' + ty;
+      const hit = tileCache.get(tkey);
+      if (hit && hit.complete && hit.naturalWidth) {
+        ctx.drawImage(hit, Math.round(tx * 256 - cx + w2), Math.round(ty * 256 - cy + h2));
+        continue;
+      }
+      if (hit) continue;
       const img = new Image();
-      img.onload = () => ctx.drawImage(img, Math.round(tx * 256 - cx + w2), Math.round(ty * 256 - cy + h2));
-      img.onerror = () => { tileFails++; if (tileFails === 1) { ctx.fillStyle = 'rgba(255,193,7,.95)'; ctx.font = 'bold 14px "Microsoft YaHei",sans-serif'; ctx.fillText('底图「' + TILE_SRC.name + '」加载失败（' + tileFails + ' 块）——上方可换底图源，或关掉底图只看两条线', 12, 26); } };
+      img.onload = () => queueRedraw();
+      img.onerror = () => { tileFails++; queueRedraw(); };
       img.src = TILE_SRC.url(map.z, x, ty);
+      tileCache.set(tkey, img);
+      if (tileCache.size > 900) tileCache.clear();
     }
   }
   const drawTrack = (pts, color, wdt) => {
@@ -582,6 +598,10 @@ function drawMap() {
   if (f) {
     if (layer !== 'fixed') drawTrack(f.pts, 'rgba(255,80,80,.95)', 2.5);
     if (layer !== 'orig') drawTrack(f.fixedPts || f.pts.map(p => { const q = GCJ.gcj2wgs(p.lat, p.lon); return { lat: q[0], lon: q[1] }; }), 'rgba(60,220,130,.95)', 2);
+  }
+  if (tileFails > 0 && map.tiles) {
+    ctx.fillStyle = 'rgba(255,193,7,.95)'; ctx.font = 'bold 14px "Microsoft YaHei",sans-serif';
+    ctx.fillText('底图「' + TILE_SRC.name + '」有 ' + tileFails + ' 块加载失败 —— 上方可换底图源，或点「底图开/关」只看两条线', 12, 26);
   }
   ctx.fillStyle = '#9aa3b2'; ctx.font = '12px Consolas,monospace';
   ctx.fillText('z' + map.z + '  ' + map.cx.toFixed(5) + ',' + map.cy.toFixed(5), 8, H - 8);
