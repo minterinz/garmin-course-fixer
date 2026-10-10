@@ -351,7 +351,7 @@ function medianDist(pts, segs) {
   const ds = [];
   for (const p of pts) {
     let best = Infinity;
-    for (const s of segs) { const d = distToSeg(p[0], p[1], s[0], s[1]); if (d < best) best = d; if (best < 0.5) break; }
+    for (const s of segs) { const d = distToSeg(Array.isArray(p) ? p[0] : p.lat, Array.isArray(p) ? p[1] : p.lon, s[0], s[1]); if (d < best) best = d; if (best < 0.5) break; }
     if (isFinite(best)) ds.push(best);
   }
   if (!ds.length) return NaN;
