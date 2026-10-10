@@ -83,9 +83,10 @@
         <button id="fit">回到轨迹</button>
         <button id="tiles">底图开/关</button>
         <select id="tilesrc" title="底图源">
-          <option value="carto">底图：CARTO 浅色</option>
-          <option value="esriSat">底图：Esri 影像</option>
           <option value="esriStreet">底图：Esri 街道</option>
+          <option value="esriSat">底图：Esri 影像</option>
+          <option value="topo">底图：OpenTopoMap 地形</option>
+          <option value="osmDe">底图：OSM 德国镜像</option>
           <option value="osm">底图：OSM 标准（可能 403）</option>
         </select>
       </div>
@@ -517,9 +518,10 @@ async function processAll() {
 }
 
 // ---------------- 迷你地图 ----------------
-const map = { cv: $('map'), ctx: $('map').getContext('2d'), z: 14, cx: 25.09, cy: 102.80, tiles: true, src: 'carto', drag: null };
+const map = { cv: $('map'), ctx: $('map').getContext('2d'), z: 14, cx: 25.09, cy: 102.80, tiles: true, src: 'esriStreet', drag: null };
 const TILE_SOURCES = {
-  carto: { name: 'CARTO 浅色', url: (z, x, y) => `https://basemaps.cartocdn.com/light_all/${z}/${x}/${y}.png` },
+  topo: { name: 'OpenTopoMap 地形', url: (z, x, y) => `https://tile.opentopomap.org/${z}/${x}/${y}.png` },
+  osmDe: { name: 'OSM 德国镜像', url: (z, x, y) => `https://tile.openstreetmap.de/${z}/${x}/${y}.png` },
   esriSat: { name: 'Esri 影像', url: (z, x, y) => `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}` },
   esriStreet: { name: 'Esri 街道', url: (z, x, y) => `https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/${z}/${y}/${x}` },
   osm: { name: 'OSM 标准', url: (z, x, y) => `https://tile.openstreetmap.org/${z}/${x}/${y}.png` },
