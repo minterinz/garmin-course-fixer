@@ -636,7 +636,7 @@ $('map').addEventListener('mousemove', e => {
   const k = Math.pow(2, map.z) * 256;
   map.cy = map.drag.cx - (e.offsetX - map.drag.x) / k * 360;
   const dLat = (e.offsetY - map.drag.y) / k * 360;
-  map.cx = y2lat(lat2y(map.drag.cy, map.z) + dLat / 360 * Math.pow(2, map.z), map.z);
+  map.cx = y2lat(lat2y(map.drag.cy, map.z) - dLat / 360 * Math.pow(2, map.z), map.z);
   drawMap();
 });
 $('map').addEventListener('wheel', e => {
