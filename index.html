@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
@@ -82,9 +82,15 @@
         <button id="zin">＋</button><button id="zout">－</button>
         <button id="fit">回到轨迹</button>
         <button id="tiles">底图开/关</button>
+        <select id="tilesrc" title="底图源">
+          <option value="carto">底图：CARTO 浅色</option>
+          <option value="esriSat">底图：Esri 影像</option>
+          <option value="esriStreet">底图：Esri 街道</option>
+          <option value="osm">底图：OSM 标准（可能 403）</option>
+        </select>
       </div>
       <canvas id="map" width="900" height="760"></canvas>
-      <div class="hint">拖动平移 · 滚轮缩放 · 底图 © OpenStreetMap。线压在道路上=对；整条线平行偏开约 365 m=就是本文要修的"加偏"。</div>
+      <div class="hint">拖动平移 · 滚轮缩放 · 底图可选 CARTO / Esri / OSM。线压在道路上=对；整条线平行偏开约 365 m=就是本文要修的"加偏"。</div>
     </div>
   </div>
 
@@ -511,7 +517,13 @@ async function processAll() {
 }
 
 // ---------------- 迷你地图 ----------------
-const map = { cv: $('map'), ctx: $('map').getContext('2d'), z: 14, cx: 25.09, cy: 102.80, tiles: true, drag: null };
+const map = { cv: $('map'), ctx: $('map').getContext('2d'), z: 14, cx: 25.09, cy: 102.80, tiles: true, src: 'carto', drag: null };
+const TILE_SOURCES = {
+  carto: { name: 'CARTO 浅色', url: (z, x, y) => `https://basemaps.cartocdn.com/light_all/${z}/${x}/${y}.png` },
+  esriSat: { name: 'Esri 影像', url: (z, x, y) => `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}` },
+  esriStreet: { name: 'Esri 街道', url: (z, x, y) => `https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/${z}/${y}/${x}` },
+  osm: { name: 'OSM 标准', url: (z, x, y) => `https://tile.openstreetmap.org/${z}/${x}/${y}.png` },
+};
 const lon2x = (lon, z) => ((lon + 180) / 360) * Math.pow(2, z);
 const lat2y = (lat, z) => (1 - Math.log(Math.tan(Math.PI / 4 + lat * Math.PI / 360)) / Math.PI) / 2 * Math.pow(2, z);
 const x2lon = (x, z) => x / Math.pow(2, z) * 360 - 180;
@@ -538,6 +550,8 @@ function drawMap() {
   ctx.fillStyle = '#0f1216'; ctx.fillRect(0, 0, W, H);
   const w2 = W / 2, h2 = H / 2;
   const cx = lon2x(map.cy, map.z) * 256, cy = lat2y(map.cx, map.z) * 256;
+  const TILE_SRC = TILE_SOURCES[map.src] || TILE_SOURCES.carto;
+  let tileFails = 0;
   if (map.tiles) {
     const t0x = Math.floor((cx - w2) / 256), t1x = Math.floor((cx + w2) / 256);
     const t0y = Math.floor((cy - h2) / 256), t1y = Math.floor((cy + h2) / 256);
@@ -547,7 +561,8 @@ function drawMap() {
       const x = ((tx % n) + n) % n;
       const img = new Image();
       img.onload = () => ctx.drawImage(img, Math.round(tx * 256 - cx + w2), Math.round(ty * 256 - cy + h2));
-      img.src = 'https://tile.openstreetmap.org/' + map.z + '/' + x + '/' + ty + '.png';
+      img.onerror = () => { tileFails++; if (tileFails === 1) { ctx.fillStyle = 'rgba(255,193,7,.95)'; ctx.font = 'bold 14px "Microsoft YaHei",sans-serif'; ctx.fillText('底图「' + TILE_SRC.name + '」加载失败（' + tileFails + ' 块）——上方可换底图源，或关掉底图只看两条线', 12, 26); } };
+      img.src = TILE_SRC.url(map.z, x, ty);
     }
   }
   const drawTrack = (pts, color, wdt) => {
@@ -588,7 +603,8 @@ $('zin').onclick = () => { map.z = Math.min(18, map.z + 1); drawMap(); };
 $('zout').onclick = () => { map.z = Math.max(3, map.z - 1); drawMap(); };
 $('fit').onclick = () => { const i = files.findIndex(f => f.pts); if (i >= 0) showOnMap(i); };
 $('tiles').onclick = () => { map.tiles = !map.tiles; drawMap(); };
-$('layer').onchange = drawMap;
+layer.onchange = drawMap;
+tilesrc.onchange = () => { map.src = tilesrc.value; drawMap(); };
 
 // ---------------- 交互 ----------------
 const drop = $('drop');
