@@ -83,8 +83,8 @@
         <button id="fit">回到轨迹</button>
         <button id="tiles">底图开/关</button>
         <select id="tilesrc" title="底图源">
-          <option value="esriStreet">底图：Esri 街道</option>
-          <option value="esriSat">底图：Esri 影像</option>
+          <option value="esriSat">底图：Esri 影像（可放到 19 级）</option>
+          <option value="esriStreet">底图：Esri 街道（仅到 16 级）</option>
           <option value="topo">底图：OpenTopoMap 地形</option>
           <option value="osmDe">底图：OSM 德国镜像</option>
           <option value="osm">底图：OSM 标准（可能 403）</option>
@@ -518,13 +518,13 @@ async function processAll() {
 }
 
 // ---------------- 迷你地图 ----------------
-const map = { cv: $('map'), ctx: $('map').getContext('2d'), z: 14, cx: 25.09, cy: 102.80, tiles: true, src: 'esriStreet', drag: null };
+const map = { cv: $('map'), ctx: $('map').getContext('2d'), z: 14, cx: 25.09, cy: 102.80, tiles: true, src: 'esriSat', drag: null };
 const TILE_SOURCES = {
-  topo: { name: 'OpenTopoMap 地形', url: (z, x, y) => `https://tile.opentopomap.org/${z}/${x}/${y}.png` },
-  osmDe: { name: 'OSM 德国镜像', url: (z, x, y) => `https://tile.openstreetmap.de/${z}/${x}/${y}.png` },
-  esriSat: { name: 'Esri 影像', url: (z, x, y) => `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}` },
-  esriStreet: { name: 'Esri 街道', url: (z, x, y) => `https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/${z}/${y}/${x}` },
-  osm: { name: 'OSM 标准', url: (z, x, y) => `https://tile.openstreetmap.org/${z}/${x}/${y}.png` },
+  topo: { name: 'OpenTopoMap 地形', max: 17, url: (z, x, y) => `https://tile.opentopomap.org/${z}/${x}/${y}.png` },
+  osmDe: { name: 'OSM 德国镜像', max: 19, url: (z, x, y) => `https://tile.openstreetmap.de/${z}/${x}/${y}.png` },
+  esriSat: { name: 'Esri 影像', max: 19, url: (z, x, y) => `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}` },
+  esriStreet: { name: 'Esri 街道', max: 16, url: (z, x, y) => `https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/${z}/${y}/${x}` },
+  osm: { name: 'OSM 标准', max: 19, url: (z, x, y) => `https://tile.openstreetmap.org/${z}/${x}/${y}.png` },
 };
 const lon2x = (lon, z) => ((lon + 180) / 360) * Math.pow(2, z);
 const lat2y = (lat, z) => (1 - Math.log(Math.tan(Math.PI / 4 + lat * Math.PI / 360)) / Math.PI) / 2 * Math.pow(2, z);
@@ -539,7 +539,8 @@ function showOnMap(idx) {
 function fitZoom(f) {
   const lats = f.pts.map(p => p.lat), lons = f.pts.map(p => p.lon);
   const spanLat = Math.max(...lats) - Math.min(...lats), spanLon = Math.max(...lons) - Math.min(...lons);
-  for (let z = 17; z >= 5; z--) {
+  const zmax = (TILE_SOURCES[map.src] || {}).max || 19;
+  for (let z = zmax; z >= 5; z--) {
     const px = lon2x(map.cy + spanLon / 2, z) - lon2x(map.cy - spanLon / 2, z);
     const py = lat2y(Math.min(...lats), z) - lat2y(Math.max(...lats), z);
     if (px * 256 < map.cv.width * 0.9 && py * 256 < map.cv.height * 0.9) { map.z = z; return; }
@@ -547,6 +548,11 @@ function fitZoom(f) {
   map.z = 6;
 }
 const tileCache = new Map();
+let previewNote = false;
+function clampZoom(z) {
+  const max = (TILE_SOURCES[map.src] || {}).max || 19;
+  return Math.max(3, Math.min(max, z));
+}
 let redrawQueued = false;
 function queueRedraw() {
   if (redrawQueued) return;
@@ -555,6 +561,7 @@ function queueRedraw() {
 }
 function drawMap() {
   const { ctx, cv } = map, W = cv.width, H = cv.height;
+  previewNote = false;
   ctx.clearRect(0, 0, W, H);
   ctx.fillStyle = '#0f1216'; ctx.fillRect(0, 0, W, H);
   const w2 = W / 2, h2 = H / 2;
@@ -597,11 +604,27 @@ function drawMap() {
   const f = files.find(x => x.pts);
   if (f) {
     if (layer !== 'fixed') drawTrack(f.pts, 'rgba(255,80,80,.95)', 2.5);
-    if (layer !== 'orig') drawTrack(f.fixedPts || f.pts.map(p => { const q = GCJ.gcj2wgs(p.lat, p.lon); return { lat: q[0], lon: q[1] }; }), 'rgba(60,220,130,.95)', 2);
+    if (layer !== 'orig') {
+      const isPreview = !f.fixedPts;
+      const pts2 = f.fixedPts || f.pts.map(p => { const q = GCJ.gcj2wgs(p.lat, p.lon); return { lat: q[0], lon: q[1] }; });
+      ctx.setLineDash(isPreview ? [7, 5] : []);
+      drawTrack(pts2, 'rgba(60,220,130,.95)', 2);
+      ctx.setLineDash([]);
+      previewNote = isPreview;
+    }
   }
   if (tileFails > 0 && map.tiles) {
     ctx.fillStyle = 'rgba(255,193,7,.95)'; ctx.font = 'bold 14px "Microsoft YaHei",sans-serif';
     ctx.fillText('底图「' + TILE_SRC.name + '」有 ' + tileFails + ' 块加载失败 —— 上方可换底图源，或点「底图开/关」只看两条线', 12, 26);
+  }
+  if (previewNote && map.tiles) {
+    const fv = (files.find(x => x.pts) || {}).detect || {};
+    ctx.fillStyle = 'rgba(60,220,130,.95)'; ctx.font = 'bold 14px "Microsoft YaHei",sans-serif';
+    ctx.fillText('绿色虚线＝"如果纠偏后"的预览，不是结果；' + (fv.verdict === 'wgs' ? '本文件判定为正常 WGS-84，不需要纠偏' : '本文件尚未生成纠偏结果'), 12, 50);
+  }
+  if (map.tiles && map.z >= ((TILE_SOURCES[map.src] || {}).max || 19)) {
+    ctx.fillStyle = 'rgba(255,193,7,.95)'; ctx.font = 'bold 13px "Microsoft YaHei",sans-serif';
+    ctx.fillText('已到「' + TILE_SRC.name + '」最大放大级别（' + map.z + ' 级）；要再放大请换 Esri 影像 / OSM 德国镜像', 12, 72);
   }
   ctx.fillStyle = '#9aa3b2'; ctx.font = '12px Consolas,monospace';
   ctx.fillText('z' + map.z + '  ' + map.cx.toFixed(5) + ',' + map.cy.toFixed(5), 8, H - 8);
@@ -618,7 +641,7 @@ $('map').addEventListener('mousemove', e => {
 });
 $('map').addEventListener('wheel', e => {
   e.preventDefault();
-  map.z = Math.max(3, Math.min(18, map.z + (e.deltaY < 0 ? 1 : -1)));
+  map.z = clampZoom(map.z + (e.deltaY < 0 ? 1 : -1));
   drawMap();
 }, { passive: false });
 $('zin').onclick = () => { map.z = Math.min(18, map.z + 1); drawMap(); };
@@ -626,7 +649,7 @@ $('zout').onclick = () => { map.z = Math.max(3, map.z - 1); drawMap(); };
 $('fit').onclick = () => { const i = files.findIndex(f => f.pts); if (i >= 0) showOnMap(i); };
 $('tiles').onclick = () => { map.tiles = !map.tiles; drawMap(); };
 layer.onchange = drawMap;
-tilesrc.onchange = () => { map.src = tilesrc.value; drawMap(); };
+tilesrc.onchange = () => { map.src = tilesrc.value; map.z = clampZoom(map.z); drawMap(); };
 
 // ---------------- 交互 ----------------
 const drop = $('drop');
